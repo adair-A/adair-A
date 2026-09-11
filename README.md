@@ -1,16 +1,19 @@
-## Hi there 👋
+# Ashton Adair
 
-<!--
-**adair-A/adair-A** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+Systems Administration student focused on IT support, Windows Server, networking, and infrastructure.
 
-Here are some ideas to get you started:
+## Projects
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+### Windows Server Infrastructure Lab
+Active Directory, DNS, DHCP, Group Policy, RRAS/NAT, file sharing, IIS, and client validation.
+
+### Firewall & Secure Networking Lab
+IPFire lab covering NAT, DHCP, firewall rules, proxy filtering, port forwarding, OpenVPN, and client-side validation.
+
+## Technologies
+
+Windows & Infrastructure: Windows 10/11, Windows Server, Active Directory, Group Policy, DNS, DHCP, IIS, RRAS, Hyper-V
+Cloud / Endpoint: Microsoft 365, Entra ID, Intune
+Networking / Security: TCP/IP, NAT, VPNs, IPFire, OpenVPN, firewalls, proxy filtering
+Virtualization / Systems: VMware, VirtualBox, Linux
+Scripting / Data: PowerShell, SQL Server, PostgreSQL
