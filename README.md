@@ -16,4 +16,4 @@ IPFire lab covering NAT, DHCP, firewall rules, proxy filtering, port forwarding,
 - **Cloud & Endpoint:** Microsoft 365, Entra ID, Intune
 - **Networking & Security:** TCP/IP, NAT, VPNs, IPFire, OpenVPN, firewalls, proxy filtering
 - **Virtualization & Systems:** VMware, VirtualBox, Linux
-- **Scripting & Data:** PowerShell, Python, SQL Server, PostgreSQL
+- **Scripting & Data:** PowerShell, SQL Server, PostgreSQL
