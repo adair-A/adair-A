@@ -1,13 +1,13 @@
 # Ashton Adair
 
-Systems Administration student focused on IT support, Windows Server, networking, and infrastructure.
+Systems Administration student focused on IT support, Windows infrastructure, networking, and endpoint management.
 
 ## Projects
 
-### Windows Server Infrastructure Lab
+### [Windows Server Infrastructure Lab](https://github.com/adair-A/windows-server-infrastructure-lab)
 Active Directory, DNS, DHCP, Group Policy, RRAS/NAT, file sharing, IIS, and client validation.
 
-### Firewall & Secure Networking Lab
+### [Firewall & Secure Networking Lab](https://github.com/adair-A/firewall-secure-networking-lab)
 IPFire lab covering NAT, DHCP, firewall rules, proxy filtering, port forwarding, OpenVPN, and client-side validation.
 
 ## Technologies
