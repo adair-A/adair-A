@@ -2,21 +2,21 @@ twitch-videoad.js text/javascript
 /*
 Modified from pixeltris/TwitchAdSolutions, commit f8f86706daf90daa534b26bce5b2f01238667d5f.
 Reliability and request-handling fixes; live playback has not been verified.
-
+ *
 MIT License
-
+ *
 Copyright (c) 2020-present TwitchAdSolutions Contributors
-
+ *
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
-
+ *
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
-
+ *
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -1019,7 +1019,6 @@ SOFTWARE.
             return realFetch.call(this, input, init, ...args);
         };
     }
-
     function onContentLoaded() {
         // This stops Twitch from pausing the player when in another tab and an ad shows.
         // Taken from https://github.com/saucettv/VideoAdBlockForTwitch/blob/cefce9d2b565769c77e3666ac8234c3acfe20d83/chrome/content.js#L30
