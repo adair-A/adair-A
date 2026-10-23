@@ -20,12 +20,24 @@ function setup() {
     vm.runInContext(source.slice(0, entry) + `
         Object.assign(window, { declareOptions, getServerTimeFromM3u8,
             stripAdSegments, getStreamUrlForResolution, hookWorkerFetch,
-            hookFetch, hookWindowWorker, gqlRequest });
+            hookFetch, hookWindowWorker, gqlRequest, hideTwitchDisplayAds });
     })();`, context);
     context.declareOptions(context);
     return { context, calls };
 }
 test('resource body parses', () => { new vm.Script(source); });
+test('display-ad styles target known containers and install only once', () => {
+    const { context: c } = setup();
+    const nodes = [];
+    c.document.getElementById = id => nodes.find(node => node.id === id);
+    c.document.createElement = tag => ({ tagName: tag });
+    c.document.head = { appendChild: node => nodes.push(node) };
+    c.hideTwitchDisplayAds();
+    c.hideTwitchDisplayAds();
+    assert.equal(nodes.length, 1);
+    assert.equal(nodes[0].tagName, 'style');
+    assert.equal(nodes[0].textContent, '.stream-display-ad__wrapper, [data-test-selector="sda-wrapper"] { display: none !important; }');
+});
 test('uBlock resource delimiters preserve the complete executable script', () => {
     const loaded = source.split(/\r?\n/).filter(line => !line.startsWith('// ')).join('\n').split(/\n\s*\n/)[0];
     new vm.Script(loaded);
