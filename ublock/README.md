@@ -1,7 +1,7 @@
 # vaft for Firefox and uBlock Origin
-Custom build: `2026-10-22.3`. Based on pixeltris/TwitchAdSolutions commit `f8f86706daf90daa534b26bce5b2f01238667d5f`. The script includes the upstream MIT license.
+Custom build: `2026-10-22.4`. Based on pixeltris/TwitchAdSolutions commit `f8f86706daf90daa534b26bce5b2f01238667d5f`. The script includes the upstream MIT license.
 
-Fresh pinned resource: https://raw.githubusercontent.com/adair-A/adair-A/c1660226b970fa40fec69df2a2aee95bf3023da2/ublock/vaft-ublock-origin.js
+Fresh pinned resource: https://raw.githubusercontent.com/adair-A/adair-A/f5e202ee368214b74d01543b5fd1ed8cdaf6dd6b/ublock/vaft-ublock-origin.js
 
 ## Install
 Use full uBlock Origin in Firefox. In **My filters**, keep:
@@ -14,7 +14,10 @@ https://raw.githubusercontent.com/adair-A/adair-A/ublock-resources/ublock/vaft-u
 ```
 Replace the previous vaft URL rather than keeping two copies of the same resource. Restart Firefox or disable/re-enable uBlock to reload resources. A new commit-pinned URL is supplied with each published release to avoid reusing an old cached resource. The branch URL receives future updates.
 
-In the Twitch browser console, `vaft custom build 2026-10-22.3 loaded` confirms the page script loaded; `hookWorkerFetch (vaft)` confirms interception was installed in a player worker. Do not paste authorization headers or tokens into bug reports.
+In the Twitch browser console, `vaft custom build 2026-10-22.4 loaded` confirms the page script loaded; `hookWorkerFetch (vaft)` confirms interception was installed in a player worker. Do not paste authorization headers or tokens into bug reports.
+
+## Side/display ads
+Persistent CSS hides `.stream-display-ad__wrapper` and `[data-test-selector="sda-wrapper"]`, the Twitch-specific containers targeted by [EasyList](https://github.com/easylist/easylist/blob/master/easylist/easylist_specific_hide.txt). Styles apply to dynamically inserted ads after channel navigation. This hides matching display-ad elements; it does not stop their network requests or hide the entire sidebar/chat. Live rendering has not been verified.
 
 ## Quality selection update
 The script now checks source-capable embed/popout backups immediately after reloads, instead of deliberately jumping to the 360p autoplay backup. It searches past a low-resolution clean candidate for a closer match to the viewer's selected resolution and frame rate, retaining the best clean candidate found. A matching clean candidate ends the search early. The 360p backup remains a last resort when no better clean stream is available. Checking additional candidates can make the transition take longer; the script cannot create high-resolution ad-free streams that Twitch does not provide.
@@ -39,7 +42,7 @@ Run with Node.js 18+ from this directory:
 ```sh
 node --test vaft-regression-tests.cjs vaft-integration-tests.cjs
 ```
-All 35 tests pass (13 regression tests and 22 integration tests). The integration suite loads the complete uBlock resource, executes generated worker code and the original-worker bootstrap fixture, and passes messages between simulated page and worker contexts. It covers token success/error/timeout, cancellation, late responses, request overloads, HLS backup and stripping flows, relative URLs, cache recovery, batched operations, and concurrent acquisition. The resource was also checked using upstream uBlock's actual `resourcesFromString` method. No whitespace-only lines may appear inside the published resource body.
+All 36 tests pass (14 regression tests and 22 integration tests). The integration suite loads the complete uBlock resource, executes generated worker code and the original-worker bootstrap fixture, and passes messages between simulated page and worker contexts. It covers token success/error/timeout, cancellation, late responses, request overloads, HLS backup and stripping flows, relative URLs, cache recovery, batched operations, and concurrent acquisition. The resource was also checked using upstream uBlock's actual `resourcesFromString` method. No whitespace-only lines may appear inside the published resource body.
 
 These checks use Node VM contexts and browser API mocks. They do not establish current live Twitch ad-blocking effectiveness or validate actual Firefox extension execution.
 
