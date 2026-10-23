@@ -44,6 +44,46 @@ const adMedia = [
 const urlOf = input => input instanceof Request ? input.url : String(input);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
+for (const scenario of [
+    { name: 'keeps source quality immediately after reload', resolutions: ['1920x1080', '1920x1080', '640x360'], expected: 'embed', requests: 1 },
+    { name: 'upgrades past a clean 360p candidate to a matching source backup', resolutions: ['640x360', '1920x1080', '640x360'], expected: 'popout', requests: 2 },
+    { name: 'retains the best clean quality when no exact match exists', resolutions: ['1280x720', '854x480', '640x360'], expected: 'embed', requests: 3 },
+    { name: 'keeps 360p as a last resort when source backups contain ads', resolutions: ['1920x1080', '1920x1080', '640x360'], dirty: ['embed', 'popout'], expected: 'autoplay', requests: 3 }
+]) {
+    test('quality selection ' + scenario.name, async () => {
+        const types = ['embed', 'popout', 'autoplay'];
+        const h = setup({
+            windowFetch: async (input, init) => {
+                const type = JSON.parse(init.body).variables.playerType;
+                return Response.json({ data: { streamPlaybackAccessToken: { signature: type, value: 'quality-token' } } });
+            },
+            workerFetch: async input => {
+                const url = new URL(urlOf(input));
+                if (url.pathname.includes('/channel/hls/')) {
+                    const type = url.searchParams.get('sig');
+                    if (!types.includes(type)) return new Response(master());
+                    const res = scenario.resolutions[types.indexOf(type)];
+                    return new Response('#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=' + res + ',FRAME-RATE=60,CODECS="avc1.64002A"\nhttps://quality.example/' + type + '.m3u8');
+                }
+                if (url.href === mediaUrl) return new Response(adMedia);
+                if (url.hostname === 'quality.example') {
+                    const type = url.pathname.slice(1).replace('.m3u8', '');
+                    return new Response(scenario.dirty?.includes(type) ? adMedia : cleanMedia.replace(liveSegment, 'https://quality.example/' + type + '.ts'));
+                }
+                throw new Error('Unexpected quality request: ' + url.href);
+            }
+        });
+        await h.worker.context.fetch(masterUrl);
+        // Intentionally keep the reload timestamp recent to exercise the former 360p shortcut.
+        const response = await h.worker.context.fetch(mediaUrl);
+        const body = await response.text();
+        assert.ok(body.includes('https://quality.example/' + scenario.expected + '.ts'));
+        assert.ok(!body.includes('stitched-ad'));
+        assert.equal(h.mainCalls.length, scenario.requests);
+        assert.deepEqual(h.errors, []);
+    });
+}
+
 function setup({ windowFetch = async () => new Response('{}'), workerFetch = async () => new Response('ok') } = {}) {
     let now = 1720000000000;
     let nextTimer = 1;
