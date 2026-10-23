@@ -34,7 +34,7 @@ SOFTWARE.
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    console.log('vaft custom build 2026-10-22.2 loaded');
+    console.log('vaft custom build 2026-10-22.3 loaded');
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -49,8 +49,6 @@ SOFTWARE.
         scope.SkipPlayerReloadOnHevc = false;// If true this will skip player reload on streams which have 2k/4k quality (if you enable this and you use the 2k/4k quality setting you'll get error #4000 / #3000 / spinning wheel on chrome based browsers)
         scope.AlwaysReloadPlayerOnAd = false;// Always pause/play when entering/leaving ads
         scope.ReloadPlayerAfterAd = true;// After the ad finishes do a player reload instead of pause/play
-        scope.PlayerReloadMinimalRequestsTime = 1500;
-        scope.PlayerReloadMinimalRequestsPlayerIndex = 2;//autoplay
         scope.HasTriggeredPlayerReload = false;
         scope.StreamInfos = Object.create(null);
         scope.StreamInfosByUrl = Object.create(null);
@@ -150,6 +148,7 @@ SOFTWARE.
                     const pendingFetchRequests = new Map();
                     ${stripAdSegments.toString()}
                     ${getStreamUrlForResolution.toString()}
+                    ${getBackupQualityScore.toString()}
                     ${processM3U8.toString()}
                     ${hookWorkerFetch.toString()}
                     ${declareOptions.toString()}
@@ -567,6 +566,20 @@ SOFTWARE.
         }
         return matchedResolutionUrl || closestResolutionUrl;
     }
+    function getBackupQualityScore(encodingsM3u8, selectedUrl, target) {
+        const lines = encodingsM3u8.replaceAll('\r', '').split('\n');
+        const [targetWidth, targetHeight] = target.Resolution.split('x').map(Number);
+        for (let i = 0; i < lines.length - 1; i++) {
+            if (!lines[i].startsWith('#EXT-X-STREAM-INF') || lines[i + 1] !== selectedUrl) continue;
+            const attributes = parseAttributes(lines[i]);
+            if (!attributes.RESOLUTION) continue;
+            const [width, height] = attributes.RESOLUTION.split('x').map(Number);
+            const distance = Math.abs(width * height - targetWidth * targetHeight);
+            const frameDistance = Math.abs(Number(attributes['FRAME-RATE'] || 0) - Number(target.FrameRate || 0));
+            return distance + Math.min(frameDistance, 999) / 1000;
+        }
+        return Infinity;
+    }
     async function processM3U8(url, textStr, realFetch) {
         const streamInfo = StreamInfosByUrl[url];
         if (!streamInfo) {
@@ -619,14 +632,11 @@ SOFTWARE.
             let backupPlayerType = null;
             let backupM3u8 = null;
             let fallbackM3u8 = null;
-            let startIndex = 0;
-            let isDoingMinimalRequests = false;
-            if (streamInfo.LastPlayerReload > Date.now() - PlayerReloadMinimalRequestsTime) {
-                // When doing player reload there are a lot of requests which causes the backup stream to load in slow. Briefly prefer using a single version to prevent long delays
-                startIndex = PlayerReloadMinimalRequestsPlayerIndex;
-                isDoingMinimalRequests = true;
-            }
-            for (let playerTypeIndex = startIndex; !backupM3u8 && playerTypeIndex < BackupPlayerTypes.length; playerTypeIndex++) {
+            let bestCleanM3u8 = null;
+            let bestCleanPlayerType = null;
+            let bestCleanScore = Infinity;
+            // Try source-capable players first, including immediately after reloads.
+            for (let playerTypeIndex = 0; !backupM3u8 && playerTypeIndex < BackupPlayerTypes.length; playerTypeIndex++) {
                 const playerType = BackupPlayerTypes[playerTypeIndex];
                 const realPlayerType = playerType.replace('-CACHED', '');
                 const isFullyCachedPlayerType = playerType != realPlayerType;
@@ -650,17 +660,25 @@ SOFTWARE.
                                     if (playerType == FallbackPlayerType) {
                                         fallbackM3u8 = m3u8Text;
                                     }
-                                    if ((!m3u8Text.includes(AdSignifier) && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
+                                    if (!m3u8Text.includes(AdSignifier) && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) {
+                                        const score = getBackupQualityScore(encodingsM3u8, streamM3u8Url, currentResolution);
+                                        if (!bestCleanM3u8 || score < bestCleanScore) {
+                                            bestCleanM3u8 = m3u8Text;
+                                            bestCleanPlayerType = playerType;
+                                            bestCleanScore = score;
+                                        }
+                                        if (score === 0) {
+                                            backupPlayerType = playerType;
+                                            backupM3u8 = m3u8Text;
+                                        }
+                                        break;
+                                    }
+                                    if (!fallbackM3u8 && !bestCleanM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1) {
                                         backupPlayerType = playerType;
                                         backupM3u8 = m3u8Text;
                                         break;
                                     }
                                     if (isFullyCachedPlayerType) {
-                                        break;
-                                    }
-                                    if (isDoingMinimalRequests) {
-                                        backupPlayerType = playerType;
-                                        backupM3u8 = m3u8Text;
                                         break;
                                     }
                                 }
@@ -672,6 +690,10 @@ SOFTWARE.
                         break;
                     }
                 }
+            }
+            if (bestCleanM3u8) {
+                backupPlayerType = bestCleanPlayerType;
+                backupM3u8 = bestCleanM3u8;
             }
             if (!backupM3u8 && fallbackM3u8) {
                 backupPlayerType = FallbackPlayerType;
