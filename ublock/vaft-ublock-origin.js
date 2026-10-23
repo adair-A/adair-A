@@ -34,7 +34,7 @@ SOFTWARE.
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    console.log('vaft custom build 2026-10-22.3 loaded');
+    console.log('vaft custom build 2026-10-22.4 loaded');
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -1146,7 +1146,19 @@ SOFTWARE.
             return realFetch.call(this, input, init, ...args);
         };
     }
+    function hideTwitchDisplayAds() {
+        const styleId = 'vaft-display-ad-styles';
+        if (document.getElementById(styleId)) return;
+        const root = document.head || document.documentElement;
+        if (!root) return;
+        const style = document.createElement('style');
+        style.id = styleId;
+        // Twitch-specific display-ad containers also targeted by EasyList.
+        style.textContent = '.stream-display-ad__wrapper, [data-test-selector="sda-wrapper"] { display: none !important; }';
+        root.appendChild(style);
+    }
     function onContentLoaded() {
+        hideTwitchDisplayAds();
         // This stops Twitch from pausing the player when in another tab and an ad shows.
         // Taken from https://github.com/saucettv/VideoAdBlockForTwitch/blob/cefce9d2b565769c77e3666ac8234c3acfe20d83/chrome/content.js#L30
         try {
