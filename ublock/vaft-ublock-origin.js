@@ -34,6 +34,7 @@ SOFTWARE.
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
+    console.log('vaft custom build 2026-10-22.2 loaded');
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -74,7 +75,8 @@ SOFTWARE.
     }
     let isActivelyStrippingAds = false;
     let localStorageHookFailed = false;
-    const twitchWorkers = [];
+    const twitchWorkers = new Set();
+    const twitchWorkerResources = new WeakMap();
     const workerStringConflicts = [
         'twitch',
         'isVariantA'// TwitchNoSub
@@ -152,13 +154,16 @@ SOFTWARE.
                     ${hookWorkerFetch.toString()}
                     ${declareOptions.toString()}
                     ${getAccessToken.toString()}
+                    ${getBackupEncodings.toString()}
                     ${gqlRequest.toString()}
                     ${parseAttributes.toString()}
                     ${getWasmWorkerJs.toString()}
                     ${getServerTimeFromM3u8.toString()}
                     ${replaceServerTimeInM3u8.toString()}
+                    ${resolvePlaylistUrls.toString()}
                     const workerString = getWasmWorkerJs(${JSON.stringify(String(twitchBlobUrl))});
                     declareOptions(self);
+                    ClientID = ${JSON.stringify(ClientID)};
                     GQLDeviceID = ${JSON.stringify(GQLDeviceID)};
                     AuthorizationHeader = ${JSON.stringify(AuthorizationHeader)};
                     ClientIntegrityHeader = ${JSON.stringify(ClientIntegrityHeader)};
@@ -180,6 +185,7 @@ SOFTWARE.
                             AuthorizationHeader = e.data.value;
                         } else if (e.data.key == 'FetchResponse') {
                             const responseData = e.data.value;
+                            if (!responseData || typeof responseData.id !== 'string') return;
                             if (pendingFetchRequests.has(responseData.id)) {
                                 const { resolve, reject, timeout } = pendingFetchRequests.get(responseData.id);
                                 clearTimeout(timeout);
@@ -211,13 +217,23 @@ SOFTWARE.
                         }
                     });
                     hookWorkerFetch();
+                    self.postMessage({ key: 'TwitchAdSolutionsReady' });
                     eval(workerString);
                 `;
-                super(URL.createObjectURL(new Blob([newBlobStr])), options);
-                twitchWorkers.push(this);
+                const resourceUrl = URL.createObjectURL(new Blob([newBlobStr]));
+                try {
+                    super(resourceUrl, options);
+                } catch (error) {
+                    URL.revokeObjectURL(resourceUrl);
+                    throw error;
+                }
+                twitchWorkerResources.set(this, { url: resourceUrl, controllers: new Map() });
+                twitchWorkers.add(this);
                 this.addEventListener('message', (e) => {
                     if (!e.data || typeof e.data !== 'object') return;
-                    if (e.data.key == 'UpdateAdBlockBanner') {
+                    if (e.data.key == 'TwitchAdSolutionsReady') {
+                        revokeTwitchWorkerUrl(this);
+                    } else if (e.data.key == 'UpdateAdBlockBanner') {
                         updateAdblockBanner(e.data);
                     } else if (e.data.key == 'PauseResumePlayer') {
                         doTwitchPlayerTask(true, false);
@@ -226,15 +242,28 @@ SOFTWARE.
                     }
                 });
                 this.addEventListener('message', async event => {
-                    if (event.data && event.data.key == 'FetchRequest') {
+                    if (event.data?.key == 'CancelFetchRequest') {
+                        twitchWorkerResources.get(this)?.controllers.get(event.data.value)?.abort();
+                    } else if (event.data?.key == 'FetchRequest') {
                         const fetchRequest = event.data.value;
-                        const responseData = await handleWorkerFetchRequest(fetchRequest);
-                        this.postMessage({
-                            key: 'FetchResponse',
-                            value: responseData
-                        });
+                        if (!fetchRequest || typeof fetchRequest.id !== 'string') return;
+                        const resources = twitchWorkerResources.get(this);
+                        if (!resources) return;
+                        const controller = new AbortController();
+                        resources.controllers.set(fetchRequest.id, controller);
+                        try {
+                            const responseData = await handleWorkerFetchRequest(fetchRequest, controller.signal);
+                            if (twitchWorkers.has(this)) this.postMessage({ key: 'FetchResponse', value: responseData });
+                        } finally {
+                            resources.controllers.delete(fetchRequest.id);
+                        }
                     }
                 });
+                this.addEventListener('error', () => revokeTwitchWorkerUrl(this));
+            }
+            terminate() {
+                releaseTwitchWorker(this);
+                return super.terminate();
             }
         };
         let workerInstance = reinsertWorkers(newWorker, reinsert);
@@ -251,6 +280,22 @@ SOFTWARE.
             }
         });
     }
+    function revokeTwitchWorkerUrl(worker) {
+        const resources = twitchWorkerResources.get(worker);
+        if (resources?.url) {
+            URL.revokeObjectURL(resources.url);
+            resources.url = null;
+        }
+    }
+    function releaseTwitchWorker(worker) {
+        const resources = twitchWorkerResources.get(worker);
+        if (!resources) return;
+        twitchWorkers.delete(worker);
+        revokeTwitchWorkerUrl(worker);
+        resources.controllers.forEach(controller => controller.abort());
+        resources.controllers.clear();
+        twitchWorkerResources.delete(worker);
+    }
     function getWasmWorkerJs(twitchBlobUrl) {
         const req = new XMLHttpRequest();
         req.open('GET', twitchBlobUrl, false);
@@ -262,7 +307,22 @@ SOFTWARE.
         console.log('hookWorkerFetch (vaft)');
         const realFetch = fetch;
         fetch = async function(url, options) {
+            if (url instanceof URL) {
+                url = url.href;
+            } else if (url instanceof Request) {
+                if ((options?.method || url.method).toUpperCase() !== 'GET') return realFetch.apply(this, arguments);
+                const request = new Request(url, options);
+                options = {
+                    ...options,
+                    method: request.method, headers: request.headers, signal: request.signal,
+                    cache: request.cache, credentials: request.credentials, integrity: request.integrity,
+                    mode: request.mode, redirect: request.redirect, referrer: request.referrer,
+                    referrerPolicy: request.referrerPolicy, keepalive: request.keepalive
+                };
+                url = request.url;
+            }
             if (typeof url === 'string') {
+                url = url.trimEnd();
                 if (AdSegmentCache.has(url)) {
                     return new Promise(function(resolve, reject) {
                         const send = function() {
@@ -280,7 +340,8 @@ SOFTWARE.
                     return new Promise(function(resolve, reject) {
                         const processAfter = async function(response) {
                             if (response.status === 200) {
-                                resolve(new Response(await processM3U8(url, await response.text(), realFetch), { status: response.status, statusText: response.statusText, headers: response.headers }));
+                                const text = resolvePlaylistUrls(await response.text(), response.url || url);
+                                resolve(new Response(await processM3U8(url, text, realFetch), { status: response.status, statusText: response.statusText, headers: response.headers }));
                             } else {
                                 resolve(response);
                             }
@@ -306,12 +367,24 @@ SOFTWARE.
                     return new Promise(function(resolve, reject) {
                         const processAfter = async function(response) {
                             if (response.status == 200) {
-                                const encodingsM3u8 = await response.text();
+                                const encodingsM3u8 = resolvePlaylistUrls(await response.text(), response.url || url);
                                 const serverTime = getServerTimeFromM3u8(encodingsM3u8);
                                 let streamInfo = StreamInfos[channelName];
-                                if (streamInfo != null && streamInfo.EncodingsM3U8 != null && (await realFetch(streamInfo.ResolutionList[0]?.Url || url)).status !== 200) {
-                                    // The cached encodings are dead (the stream probably restarted)
-                                    streamInfo = null;
+                                if (streamInfo != null && streamInfo.EncodingsM3U8 != null) {
+                                    let isAlive = false;
+                                    const probeController = new AbortController();
+                                    const probeTimeout = setTimeout(() => probeController.abort(), 3000);
+                                    try {
+                                        const probe = await realFetch(streamInfo.ResolutionList[0]?.Url || url, { signal: probeController.signal });
+                                        isAlive = probe.status === 200;
+                                        if (probe.body) await probe.body.cancel();
+                                    } catch {} finally { clearTimeout(probeTimeout); }
+                                    if (!isAlive) {
+                                        for (const cachedUrl of Object.keys(streamInfo.Urls)) {
+                                            if (StreamInfosByUrl[cachedUrl] === streamInfo) delete StreamInfosByUrl[cachedUrl];
+                                        }
+                                        streamInfo = null;
+                                    }
                                 }
                                 if (streamInfo == null || streamInfo.EncodingsM3U8 == null) {
                                     StreamInfos[channelName] = streamInfo = {
@@ -396,6 +469,17 @@ SOFTWARE.
             }
             return realFetch.apply(this, arguments);
         };
+    }
+    function resolvePlaylistUrls(text, baseUrl) {
+        if (!text.trimStart().startsWith('#EXTM3U')) return text;
+        const resolve = uri => {
+            try { return new URL(uri, baseUrl).href; } catch { return uri; }
+        };
+        return text.replaceAll('\r', '').split('\n').map(line => {
+            if (line && !line.startsWith('#')) return resolve(line.trim());
+            if (line.startsWith('#EXT-X-TWITCH-PREFETCH:')) return '#EXT-X-TWITCH-PREFETCH:' + resolve(line.slice(line.indexOf(':') + 1));
+            return line.replace(/([,:])URI="([^"]*)"/g, (match, prefix, uri) => prefix + 'URI="' + resolve(uri) + '"');
+        }).join('\n');
     }
     function getServerTimeFromM3u8(encodingsM3u8) {
         if (V2API) {
@@ -553,17 +637,7 @@ SOFTWARE.
                     if (!encodingsM3u8) {
                         isFreshM3u8 = true;
                         try {
-                            const accessTokenResponse = await getAccessToken(streamInfo.ChannelName, realPlayerType);
-                            if (accessTokenResponse.status === 200) {
-                                const accessToken = await accessTokenResponse.json();
-                                const urlInfo = new URL('https://usher.ttvnw.net/api/' + (V2API ? 'v2/' : '') + 'channel/hls/' + streamInfo.ChannelName + '.m3u8' + streamInfo.UsherParams);
-                                urlInfo.searchParams.set('sig', accessToken.data.streamPlaybackAccessToken.signature);
-                                urlInfo.searchParams.set('token', accessToken.data.streamPlaybackAccessToken.value);
-                                const encodingsM3u8Response = await realFetch(urlInfo.href);
-                                if (encodingsM3u8Response.status === 200) {
-                                    encodingsM3u8 = streamInfo.BackupEncodingsM3U8Cache[playerType] = await encodingsM3u8Response.text();
-                                }
-                            }
+                            encodingsM3u8 = await getBackupEncodings(streamInfo, playerType, realPlayerType, realFetch);
                         } catch (err) {}
                     }
                     if (encodingsM3u8) {
@@ -571,7 +645,7 @@ SOFTWARE.
                             const streamM3u8Url = getStreamUrlForResolution(encodingsM3u8, currentResolution);
                             const streamM3u8Response = await realFetch(streamM3u8Url);
                             if (streamM3u8Response.status == 200) {
-                                const m3u8Text = await streamM3u8Response.text();
+                                const m3u8Text = resolvePlaylistUrls(await streamM3u8Response.text(), streamM3u8Response.url || streamM3u8Url);
                                 if (m3u8Text) {
                                     if (playerType == FallbackPlayerType) {
                                         fallbackM3u8 = m3u8Text;
@@ -593,7 +667,7 @@ SOFTWARE.
                             }
                         } catch (err) {}
                     }
-                    streamInfo.BackupEncodingsM3U8Cache[playerType] = null;
+                    if (streamInfo.BackupEncodingsM3U8Cache[playerType] === encodingsM3u8) streamInfo.BackupEncodingsM3U8Cache[playerType] = null;
                     if (isFreshM3u8) {
                         break;
                     }
@@ -675,6 +749,31 @@ SOFTWARE.
         };
         return gqlRequest(body, playerType);
     }
+    async function getBackupEncodings(streamInfo, playerType, realPlayerType, realFetch) {
+        if (streamInfo.BackupEncodingsM3U8Cache[playerType]) return streamInfo.BackupEncodingsM3U8Cache[playerType];
+        const pending = streamInfo.BackupEncodingsM3U8Promises ||= Object.create(null);
+        if (pending[playerType]) return pending[playerType];
+        const task = (async () => {
+            const response = await getAccessToken(streamInfo.ChannelName, realPlayerType);
+            if (response.status !== 200) {
+                if (response.body) await response.body.cancel();
+                return null;
+            }
+            const token = (await response.json()).data?.streamPlaybackAccessToken;
+            if (!token?.signature || !token?.value) return null;
+            const url = new URL('https://usher.ttvnw.net/api/' + (V2API ? 'v2/' : '') + 'channel/hls/' + streamInfo.ChannelName + '.m3u8' + streamInfo.UsherParams);
+            url.searchParams.set('sig', token.signature);
+            url.searchParams.set('token', token.value);
+            const master = await realFetch(url.href);
+            if (master.status !== 200) {
+                if (master.body) await master.body.cancel();
+                return null;
+            }
+            return streamInfo.BackupEncodingsM3U8Cache[playerType] = resolvePlaylistUrls(await master.text(), master.url || url.href);
+        })();
+        pending[playerType] = task;
+        try { return await task; } finally { if (pending[playerType] === task) delete pending[playerType]; }
+    }
     function gqlRequest(body, playerType) {
         if (!GQLDeviceID) {
             GQLDeviceID = '';
@@ -705,13 +804,17 @@ SOFTWARE.
             };
             const timeout = setTimeout(() => {
                 pendingFetchRequests.delete(requestId);
+                try { postMessage({ key: 'CancelFetchRequest', value: requestId }); } catch {}
                 reject(new Error('Twitch GraphQL request timed out'));
             }, 15000);
             pendingFetchRequests.set(requestId, { resolve, reject, timeout });
-            postMessage({
-                key: 'FetchRequest',
-                value: fetchRequest
-            });
+            try {
+                postMessage({ key: 'FetchRequest', value: fetchRequest });
+            } catch (error) {
+                clearTimeout(timeout);
+                pendingFetchRequests.delete(requestId);
+                reject(error);
+            }
         });
     }
     let playerForMonitoringBuffering = null;
@@ -943,9 +1046,9 @@ SOFTWARE.
             worker.postMessage({key: key, value: value});
         });
     }
-    async function handleWorkerFetchRequest(fetchRequest) {
+    async function handleWorkerFetchRequest(fetchRequest, signal) {
         try {
-            const response = await window.realFetch(fetchRequest.url, fetchRequest.options);
+            const response = await window.realFetch(fetchRequest.url, { ...fetchRequest.options, signal });
             const responseBody = await response.text();
             const responseObject = {
                 id: fetchRequest.id,
@@ -976,6 +1079,10 @@ SOFTWARE.
                 return realFetch.call(this, input, init, ...args);
             }
             const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+            const clientId = headers.get('Client-ID');
+            if (clientId && clientId !== ClientID) {
+                postTwitchWorkerMessage('UpdateClientId', ClientID = clientId);
+            }
             const deviceId = headers.get('X-Device-Id') || headers.get('Device-ID');
             if (deviceId && deviceId !== GQLDeviceID) {
                 postTwitchWorkerMessage('UpdateDeviceId', GQLDeviceID = deviceId);
@@ -996,9 +1103,7 @@ SOFTWARE.
                 }
             }
             if (typeof init?.body === 'string' && init.body.includes('PlaybackAccessToken')) {
-                if (init.body.includes('picture-by-picture')) {
-                    init = { ...init, body: '' };
-                } else if (ForceAccessTokenPlayerType) {
+                if (ForceAccessTokenPlayerType) {
                     try {
                         const body = JSON.parse(init.body);
                         let changed = false;
